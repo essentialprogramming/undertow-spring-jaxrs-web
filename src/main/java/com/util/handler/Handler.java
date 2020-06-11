@@ -1,4 +1,4 @@
-package com.server.handler;
+package com.util.handler;
 
 /**
  *  A generic event handler.

@@ -1,5 +1,6 @@
 package com.undertow.standalone;
 
+import static com.config.ApplicationContextFactory.getSpringApplicationContext;
 import static io.undertow.servlet.Servlets.defaultContainer;
 import static io.undertow.servlet.Servlets.deployment;
 import static io.undertow.servlet.Servlets.servlet;
@@ -9,8 +10,9 @@ import java.util.concurrent.locks.ReentrantLock;
 
 import javax.servlet.ServletException;
 
-import com.config.ContextLoaderListenerInstanceFactory;
+import io.undertow.servlet.api.InstanceFactory;
 import io.undertow.servlet.api.ListenerInfo;
+import io.undertow.servlet.util.ImmediateInstanceFactory;
 import org.glassfish.jersey.servlet.ServletContainer;
 
 import com.config.ApplicationConfig;
@@ -27,17 +29,10 @@ import io.undertow.server.handlers.resource.ClassPathResourceManager;
 import io.undertow.server.handlers.resource.ResourceHandler;
 import io.undertow.servlet.api.DeploymentInfo;
 import io.undertow.servlet.api.DeploymentManager;
-import io.undertow.websockets.WebSocketConnectionCallback;
-import io.undertow.websockets.WebSocketProtocolHandshakeHandler;
-import io.undertow.websockets.core.AbstractReceiveListener;
-import io.undertow.websockets.core.BufferedTextMessage;
-import io.undertow.websockets.core.WebSocketChannel;
-import io.undertow.websockets.core.WebSockets;
-import io.undertow.websockets.spi.WebSocketHttpExchange;
 import org.springframework.web.context.ContextLoaderListener;
+import org.springframework.web.context.WebApplicationContext;
 
 import static com.util.cloud.DeploymentConfiguration.getProperty;
-import static io.undertow.Handlers.websocket;
 
 public final class UndertowServer {
 
@@ -55,17 +50,16 @@ public final class UndertowServer {
 		this.deploymentName = deploymentName;
 	}
 
-	private static ListenerInfo createContextLoaderListener() {
-		return new ListenerInfo(ContextLoaderListener.class,
-				new ContextLoaderListenerInstanceFactory());
-
+	private static ListenerInfo createContextLoaderListener(WebApplicationContext context) {
+		InstanceFactory<ContextLoaderListener> factory = new ImmediateInstanceFactory<>(new ContextLoaderListener(context));
+		return new ListenerInfo(ContextLoaderListener.class, factory);
 	}
 
 	private HttpHandler bootstrap() throws ServletException {
 		final DeploymentInfo servletBuilder = deployment()
 				.setClassLoader(Server.class.getClassLoader())
 				.setContextPath("/")
-				.addListeners(createContextLoaderListener())
+				.addListeners(createContextLoaderListener(getSpringApplicationContext()))
 				.setResourceManager(new ClassPathResourceManager(Server.class.getClassLoader(), "webapp/resources"))
 				.addWelcomePage("index.html")
 				.setDeploymentName(deploymentName)
@@ -87,29 +81,11 @@ public final class UndertowServer {
 				.addWelcomeFiles("index.html")
 				.setDirectoryListingEnabled(false);
 
-		//Websocket handler
-		final WebSocketProtocolHandshakeHandler chatHandler = websocket(new WebSocketConnectionCallback() {
 
-			@Override
-			public void onConnect(WebSocketHttpExchange exchange, WebSocketChannel channel) {
-				channel.getReceiveSetter().set(new AbstractReceiveListener() {
-
-					@Override
-					protected void onFullTextMessage(WebSocketChannel channel, BufferedTextMessage message) {
-						final String messageData = message.getData();
-						for (WebSocketChannel session : channel.getPeerConnections()) {
-							WebSockets.sendText(messageData, session, null);
-						}
-					}
-				});
-				channel.resumeReceives();
-			}
-		});
 
 		final PathHandler pathHandler = Handlers.path()
 				.addPrefixPath("/", servletHandler)
-				.addPrefixPath("apidoc", resourceHandler)
-				.addPrefixPath("/chat", chatHandler);
+				.addPrefixPath("apidoc", resourceHandler);
 
 		return pathHandler;
 	}
